@@ -2,10 +2,8 @@ package help
 
 import (
 	"bufio"
-	"fmt"
 	"io"
-	"ipgw/base"
-	"ipgw/text"
+	. "ipgw/base"
 	"os"
 	"strings"
 	"text/template"
@@ -15,11 +13,11 @@ import (
 
 // Help implements the 'help' command.
 func Help(w io.Writer, args []string) {
-	cmd := base.IPGW
+	cmd := Main
 Args:
 	for i, arg := range args {
 		for _, sub := range cmd.Commands {
-			if sub.Name() == arg {
+			if sub.Name == arg {
 				cmd = sub
 				continue Args
 			}
@@ -30,15 +28,13 @@ Args:
 		if i > 0 {
 			helpSuccess += " " + strings.Join(args[:i], " ")
 		}
-		fmt.Fprintf(os.Stderr, text.HelpNotFound, strings.Join(args, " "), helpSuccess)
-		base.SetExitStatus(2) // failed at 'ipgw help cmd'
-		base.Exit()
+		FatalF(CmdNotFound, strings.Join(args, " "), helpSuccess)
 	}
 
 	if len(cmd.Commands) > 0 {
-		PrintUsage(os.Stdout, cmd)
+		printUsage(w, cmd)
 	} else {
-		tmpl(os.Stdout, text.HelpTemplate, cmd)
+		tmpl(w, SimpleUsageTemplate, cmd)
 	}
 	// not exit 2: succeeded at 'ipgw help cmd'.
 	return
@@ -68,10 +64,9 @@ func tmpl(w io.Writer, text string, data interface{}) {
 	if ew.err != nil {
 		// I/O error writing. Ignore write on closed pipe.
 		if strings.Contains(ew.err.Error(), "pipe") {
-			base.SetExitStatus(1)
-			base.Exit()
+			os.Exit(1)
 		}
-		base.Fatalf("writing output: %v", ew.err)
+		FatalF("writing output: %v", ew.err)
 	}
 	if err != nil {
 		panic(err)
@@ -86,8 +81,32 @@ func capitalize(s string) string {
 	return string(unicode.ToTitle(r)) + s[n:]
 }
 
-func PrintUsage(w io.Writer, cmd *base.Command) {
+func PrintNotFound(cmdName string) {
+	FatalF(CmdNotFound, cmdName, "ipgw help")
+}
+
+// 在别的包被调用肯定是因为报错，所以公开的方法直接指定为os.Stderr
+// 且直接终止程序。
+// 用于打印有子命令的命令
+func PrintUsage(cmd *Command) {
+	printUsage(os.Stderr, cmd)
+	os.Exit(2)
+}
+
+// 用于打印无子命令的命令
+func PrintSimpleUsage(cmd *Command) {
+	printSimpleUsage(os.Stderr, cmd)
+	os.Exit(2)
+}
+
+func printUsage(w io.Writer, cmd *Command) {
 	bw := bufio.NewWriter(w)
-	tmpl(bw, text.HelpUsageTemplate, cmd)
-	bw.Flush()
+	tmpl(bw, UsageTemplate, cmd)
+	_ = bw.Flush()
+}
+
+func printSimpleUsage(w io.Writer, cmd *Command) {
+	bw := bufio.NewWriter(w)
+	tmpl(bw, SimpleUsageTemplate, cmd)
+	_ = bw.Flush()
 }

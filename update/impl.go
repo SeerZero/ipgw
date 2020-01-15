@@ -1,235 +1,76 @@
 package update
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"io/ioutil"
-	"ipgw/base/cfg"
-	"ipgw/base/ctx"
-	"ipgw/share"
-	"net/http"
+	. "ipgw/base"
+	"ipgw/ctx"
+	. "ipgw/lib"
 	"os"
-	"path/filepath"
-	"regexp"
 	"runtime"
-	"sort"
-	"strings"
-	"time"
 )
 
-func checkVersion() *ver {
-	fmt.Println(querying)
-	i := &ver{Update: false}
-	client := ctx.GetClient()
-	// 优先neu.ee
-	resp, err := client.Get(cfg.ReleasePath + "/info.json")
-	if err == nil {
-		res, _ := ioutil.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+// 获取版本信息
+func checkVersion() (v *Ver) {
+	// Todo 暂时删去对Github Release API的使用。原因如下：
+	//  1. 速度有待商榷；
+	//  2.就算通过Github获取了新版本信息，由于没有对应的下载实现，等于无用
 
-		if cfg.FullView {
-			fmt.Printf(getResponse, string(res))
-		}
+	InfoL(querying)
 
-		_ = json.Unmarshal(res, &i)
+	// 查询信息解析为Ver
+	v = ParseVer(ReleasePath)
 
-		if len(i.Latest) < 1 {
-			fmt.Fprintln(os.Stderr, failQuery)
-			os.Exit(2)
-		}
-
-		if !isNewer(i.Latest) {
-			fmt.Println(alreadyLatest)
-			return i
-		}
-		i.Update = true
-		fmt.Printf(latestVersion, i.Latest)
-		return i
-	} else {
-		if cfg.FullView {
-			fmt.Fprintln(os.Stderr, useGithub)
-		}
+	// 判断是否是更新版本
+	if !IsNewer(v.Latest, Version) {
+		// 本地已是最新
+		InfoL(alreadyLatest)
+		return v
 	}
-
-	// neu.ee超时之后使用github。
-
-	resp, err = client.Get("https://api.github.com/repos/imyown/ipgw/releases/latest")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, errNet)
-		os.Exit(2)
-	}
-
-	body := share.ReadBody(resp)
-
-	tagExp := regexp.MustCompile(`"tag_name":"(.+?)"`)
-	tags := tagExp.FindAllStringSubmatch(body, -1)
-
-	if len(tags) == 0 {
-		fmt.Fprintln(os.Stderr, failQuery)
-		os.Exit(2)
-	}
-
-	tag := tags[0][1]
-	if !isNewer(tag) {
-		fmt.Println(alreadyLatest)
-		return i
-	}
-
-	i.Update = true
-	fmt.Printf(latestVersion, tag)
-	return i
+	// 本地不是最新
+	v.Update = true
+	InfoF(latestVersion, v.Latest)
+	return v
 }
 
-func printChangelog(i *ver) {
-	fmt.Println()
-	fmt.Println(changelog)
-	// 版本排序
-	var tmp = make([]string, 0)
-	for k, _ := range i.Changelog {
-		tmp = append(tmp, k)
-	}
+func update(v *Ver) {
+	// 当前运行的版本的所在目录
+	old, dir := GetRealPathAndDir()
 
-	sort.Sort(sort.Reverse(sort.StringSlice(tmp)))
-	for _, v := range tmp {
-		if v == cfg.Version {
-			break
-		}
-		fmt.Printf(changelogTitle, v)
-		for _, l := range i.Changelog[v] {
-			fmt.Printf(changelogContent, l)
-		}
-	}
-	fmt.Println()
-}
-
-func getReleaseUrl(i *ver) string {
-	u := cfg.ReleasePath
-	// 检查arch
-	_, ok := i.Arch[runtime.GOARCH]
-	if !ok {
-		fmt.Fprintln(os.Stderr, failArchNotSupported)
-		os.Exit(2)
-	}
-
-	// 检查版本
-	if len(i.Latest) < 1 {
-		fmt.Fprintln(os.Stderr, failGetReleasePath)
-		os.Exit(2)
-	}
-	u += "/" + i.Latest
-
-	// 检查os
-	s, ok := i.OS[runtime.GOOS]
-	if !ok {
-		fmt.Fprintln(os.Stderr, failOSNotSupported)
-		os.Exit(2)
-	}
-	u += "/" + s
-
-	// 获取文件名
-	n, ok := i.Name[runtime.GOOS]
-	if !ok {
-		fmt.Fprintln(os.Stderr, failOSNotSupported)
-		os.Exit(2)
-	}
-	u += "/" + n
-	return u
-}
-
-func download(u string, dir string) {
-	client := &http.Client{}
-	client.Timeout = 60 * time.Second
-	resp, err := client.Get(u)
-	if err != nil {
-		if cfg.FullView {
-			fmt.Fprintf(os.Stderr, errReason, err)
-		}
-		fmt.Fprintln(os.Stderr, errNet)
-		os.Exit(2)
-	}
-	if resp.StatusCode == http.StatusNotFound {
-		fmt.Fprintln(os.Stderr, wrongUrl)
-		os.Exit(2)
-	}
-
-	raw := resp.Body
-	defer raw.Close()
-
-	f, err := os.Create(dir + "ipgw.download")
-	if err != nil {
-		if cfg.FullView {
-			fmt.Fprintf(os.Stderr, errReason, err)
-		}
-		fmt.Fprintln(os.Stderr, failCreate)
-		os.Exit(2)
-	}
-
-	d := &downloader{
-		Reader: raw,
-		Total:  resp.ContentLength,
-	}
-	io.Copy(f, d)
-	f.Chmod(0777)
-	f.Close()
-	fmt.Println()
-}
-
-func update(i *ver) {
-	path, err := os.Executable()
-	if err != nil {
-		if cfg.FullView {
-			fmt.Fprintf(os.Stderr, errReason, err)
-		}
-		fmt.Fprintln(os.Stderr, errRunEnv)
-		os.Exit(2)
-	}
-	old, _ := filepath.Abs(path)
-	dir := filepath.Dir(old) + string(os.PathSeparator)
+	// 临时文件名
+	tmpName := dir + "ipgw.download"
 
 	// 下载
-	download(getReleaseUrl(i), dir)
+	Download(GetDownloadUrl(ReleasePath, v), tmpName)
 
-	fmt.Println(updating)
+	InfoL(updating)
 
-	if cfg.FullView {
-		fmt.Println(removing)
-	}
-	err = os.Rename(old, dir+"ipgw.old")
-	if err != nil {
-		if cfg.FullView {
-			fmt.Fprintf(os.Stderr, errReason, err)
-		}
-		fmt.Println(failUpdate)
-		os.Exit(2)
+	// 修改下载的文件权限
+	_ = os.Chmod(tmpName, 0777)
+
+	if ctx.FullView {
+		InfoL(removing)
 	}
 
-	if cfg.FullView {
-		fmt.Println(covering)
+	// 将当前运行的版本改名为ipgw.old
+	err := os.Rename(old, dir+"ipgw.old")
+	fatalHandler(err, failUpdate)
+
+	if ctx.FullView {
+		InfoL(covering)
 	}
 
-	err = os.Rename(dir+"ipgw.download", dir+i.Name[runtime.GOOS])
-	if err != nil {
-		if cfg.FullView {
-			fmt.Fprintf(os.Stderr, errReason, err)
-		}
-		fmt.Println(failUpdate)
-		os.Exit(2)
-	}
-	fmt.Println(successUpdate)
+	// 将下载的新版本改名为正确名字
+	err = os.Rename(tmpName, dir+v.Name[runtime.GOOS])
+	fatalHandler(err, failUpdate)
+
+	InfoL(successUpdate)
 }
 
-func isNewer(v string) bool {
-	var fetched, local []string
-	if len(cfg.Version) < 1 {
-		return true
-	}
-	fetched = strings.Split(v[1:], ".")
-	local = strings.Split(cfg.Version[1:], ".")
-	for i := 0; i < 3; i++ {
-		if fetched[i] > local[i] {
-			return true
+// 处理err
+func fatalHandler(err error, fatalText string) {
+	if err != nil {
+		if ctx.FullView {
+			ErrorF(errReason, err)
 		}
+		FatalL(fatalText)
 	}
-	return false
 }

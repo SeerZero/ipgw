@@ -1,10 +1,8 @@
 package logout
 
 import (
-	"fmt"
-	"ipgw/base"
-	"ipgw/base/cfg"
-	"ipgw/base/ctx"
+	. "ipgw/base"
+	"ipgw/ctx"
 	"os"
 )
 
@@ -17,12 +15,13 @@ func init() {
 	CmdLogout.Flag.StringVar(&p, "p", "", "")
 	CmdLogout.Flag.StringVar(&c, "c", "", "")
 
-	CmdLogout.Flag.BoolVar(&cfg.FullView, "v", false, "")
+	CmdLogout.Flag.BoolVar(&ctx.FullView, "v", false, "")
 
 	CmdLogout.Run = runLogout
 }
 
-var CmdLogout = &base.Command{
+var CmdLogout = &Command{
+	Name:      "logout",
 	UsageLine: "ipgw logout [-u username] [-p password] [-c cookie] [-v view all]",
 	Short:     "基础登出",
 	Long: `提供登出校园网关功能
@@ -44,23 +43,19 @@ var CmdLogout = &base.Command{
 `,
 }
 
-func init() {
-	CmdLogout.Run = runLogout // break init cycle
-}
-
-func runLogout(cmd *base.Command, args []string) {
-	x := ctx.GetCtx()
+func runLogout(cmd *Command, args []string) {
+	x := ctx.NewCtx()
 
 	if len(u) > 0 {
 		if len(p) == 0 {
-			fmt.Fprintln(os.Stderr, mustUsePWhenUseU)
-			return
+			FatalL(mustUsePWhenUseU)
 		}
 		x.User.Username = u
 		x.User.Password = p
 		logoutWithUP(x)
 	} else if len(c) > 0 {
 		x.User.SetCookie(c)
+		// 为了兼容无参数登出，必须使Cookie登出返回一个是否成功的bool然后在这判断并结束程序
 		ok := logoutWithC(x)
 		if !ok {
 			os.Exit(2)
@@ -72,18 +67,15 @@ func runLogout(cmd *base.Command, args []string) {
 			return
 		}
 
-		// 这就要求不能直接在方法里os.Exit()了
 		ok = logoutWithC(x)
 		if ok {
 			return
 		}
 
 		if x.User.Username == "" {
-			fmt.Fprintln(os.Stderr, noStoredAccount)
-			os.Exit(2)
+			FatalL(noStoredAccount)
 		}
 		// 若cookie失效，则使用账号密码
 		logoutWithUP(x)
 	}
-
 }

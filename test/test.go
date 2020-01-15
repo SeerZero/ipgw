@@ -1,11 +1,12 @@
 package test
 
 import (
-	"ipgw/base"
-	"ipgw/base/cfg"
+	. "ipgw/base"
+	"ipgw/ctx"
 )
 
-var CmdTest = &base.Command{
+var CmdTest = &Command{
+	Name:      "test",
 	UsageLine: "ipgw test [-v view all]",
 	Short:     "校园网测试",
 	Long: `提供对于校园网的测试功能
@@ -19,11 +20,11 @@ var CmdTest = &base.Command{
 }
 
 func init() {
-	CmdTest.Flag.BoolVar(&cfg.FullView, "v", false, "")
+	CmdTest.Flag.BoolVar(&ctx.FullView, "v", false, "")
 
 	CmdTest.Run = runTest
 }
 
-func runTest(cmd *base.Command, args []string) {
-	testImpl()
+func runTest(cmd *Command, args []string) {
+	test()
 }

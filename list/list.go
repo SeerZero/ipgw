@@ -1,16 +1,14 @@
 package list
 
 import (
-	"fmt"
-	"ipgw/base"
-	"ipgw/base/cfg"
-	"ipgw/base/ctx"
-	"os"
+	. "ipgw/base"
+	"ipgw/ctx"
 	"strconv"
 	"strings"
 )
 
-var CmdList = &base.Command{
+var CmdList = &Command{
+	Name:        "list",
 	CustomFlags: true,
 	UsageLine:   "ipgw list [-f full] [-v view all] [-s saved] [-u username] [-p password] [-c cookie] [-a all] [-l local info] [-d devices] [-i net info] [-r recharge] [-b bill] [-h history] page",
 	Short:       "获取各类信息",
@@ -81,77 +79,98 @@ func init() {
 	CmdList.Flag.StringVar(&p, "p", "", "使用指定账号查询")
 
 	CmdList.Flag.BoolVar(&f, "f", false, "列出所有信息的具体查询结果")
-	CmdList.Flag.BoolVar(&cfg.FullView, "v", false, "输出所有中间信息")
+	CmdList.Flag.BoolVar(&ctx.FullView, "v", false, "输出所有中间信息")
 
-	CmdList.Run = runList // break init cycle
+	CmdList.Run = runList
 }
 
-func runList(cmd *base.Command, args []string) {
+func runList(cmd *Command, args []string) {
+	// 解析，把缩写形式拆开
 	parse(cmd, args)
-	//fmt.Println(a, c, d, h, i, s, cfg.FullView, cmd.Flag.Args())
-	x := ctx.GetCtx()
+
+	x := ctx.NewCtx()
+
+	// Index Body
 	var ib string
 	if u != "" {
+		// 如果使用账号登陆
 		if p == "" {
-			fmt.Fprintln(os.Stderr, mustUsePWhenUseU)
+			// 必须要密码
+			ErrorL(mustUsePWhenUseU)
 			return
 		}
 		x.User.Username = u
 		x.User.Password = p
 		ib = fetchIndexBodyByUP(x)
 	} else if c != "" {
-		x.User.SetCAS(c)
-		ib = fetchIndexBodyByCAS(x)
+		// 使用Cookie登陆
+		x.User.SetCookie(c)
+		ib = fetchIndexBodyByC(x)
 	} else if s {
+		// 使用保存的账号登陆
 		x.Load()
+		if x.User.Username == "" {
+			FatalL(noStoredAccount)
+		}
 		ib = fetchIndexBodyByUP(x)
 	} else if a || i || d || h || b || r {
+		// 若涉及网络请求
+		// 使用Cookie登陆
 		x.Load()
-		ib = fetchIndexBodyByCAS(x)
+		ib = fetchIndexBodyByC(x)
 	}
 
 	if a || i || d || h || b || r {
+		// 若涉及网络请求
 		processUser(ib)
 	} else {
+		// 若不涉及网络请求，直接打印本地信息
 		x.Load()
 		processLocal(x)
 	}
 
 	if a || i {
+		// 获取套餐信息
 		processInfo(ib)
 	}
 	if a || d {
+		// 获取登陆设备信息
 		processDevice(ib)
 	}
 
 	if a || b {
-		bb := fetchBillBody()
+		// 获取扣费信息
+		bb := fetchBillBody(x)
 		processBill(bb)
 	}
 
 	if a || r {
-		rb := fetchRechargeBody()
+		// 获取充值信息
+		rb := fetchRechargeBody(x)
 		processRecharge(rb)
 	}
 
 	if a || h {
+		// 获取使用记录
 		var hb string
 		if len(cmd.Flag.Args()) < 1 {
-			hb = fetchHistoryBody(1)
+			// 若没有剩余的参数，即没有指定第几页，默认1
+			hb = fetchHistoryBody(x, 1)
 		} else {
 			p, e := strconv.Atoi(cmd.Flag.Args()[0])
 			if e != nil {
-				fmt.Fprintln(os.Stderr, wrongPageNotInt)
+				// 检验页数是否为整形
+				ErrorL(wrongPageNotInt)
 			}
-			hb = fetchHistoryBody(p)
+			hb = fetchHistoryBody(x, p)
 		}
-
 		processHistory(hb)
 	}
 
 }
 
-func parse(cmd *base.Command, args []string) {
+// 支持flag缩写，算法可能还能优化
+func parse(cmd *Command, args []string) {
 	separated := make([]string, 0, len(args))
 	for _, flagChar := range args {
 		if len(flagChar) > 2 && strings.HasPrefix(flagChar, "-") {
@@ -163,12 +182,12 @@ func parse(cmd *base.Command, args []string) {
 						continue charLoop
 					}
 				}
-				fmt.Fprintf(os.Stdout, wrongArgNotFound, string(c))
+				ErrorF(wrongArgNotFound, string(c))
 				cmd.Usage()
 			}
 			continue
 		}
 		separated = append(separated, flagChar)
 	}
-	cmd.Flag.Parse(separated)
+	_ = cmd.Flag.Parse(separated)
 }
