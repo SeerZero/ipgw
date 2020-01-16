@@ -113,22 +113,16 @@ func getArgs(c *ctx.Ctx, reqUrl string) (lt, postUrl string) {
 // 根据是否webvpn获取请求地址
 func getReqUrl(serviceUrl string, vpn bool) (reqUrl string) {
 	if vpn {
-		reqUrl = "https://pass-443.webvpn.neu.edu.cn/tpass/login?service="
+		return "https://pass-443.webvpn.neu.edu.cn/tpass/login?service=https%3A%2F%2Fwebvpn.neu.edu.cn%2Fusers%2Fauth%2Fcas%2Fcallback%3Furl"
 	} else {
 		reqUrl = "https://pass.neu.edu.cn/tpass/login?service="
-	}
-	if len(serviceUrl) > 0 {
-		reqUrl += url.QueryEscape(serviceUrl)
-	} else {
-		if vpn {
-			// 定向到webvpn
-			reqUrl += "https%3A%2F%2Fwebvpn.neu.edu.cn%2Fusers%2Fauth%2Fcas%2Fcallback%3Furl"
+		if len(serviceUrl) > 0 {
+			reqUrl += url.QueryEscape(serviceUrl)
 		} else {
-			// 定向到portal
 			reqUrl += "https%3A%2F%2Fportal.neu.edu.cn%2Ftp_up%2F"
 		}
+		return
 	}
-	return
 }
 
 // 使用Cookie登陆，若失败则直接结束程序并输出错误码，因此不需要返回是否登陆成功
